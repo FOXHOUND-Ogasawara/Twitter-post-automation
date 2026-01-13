@@ -36,8 +36,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const match = base64Image.match(/^data:(image\/\w+);base64,/);
         const mimeType = match ? match[1] : "image/jpeg";
 
-        // Map mime to extension for twitter-api-v2 'type' option
-        // It helps form-data determine filename/content-type
+        // Map mime to extension string for twitter-api-v2 'type' option
+        // The library expects 'jpg', 'png', etc. when uploading buffers.
         let type = "jpg";
         if (mimeType === "image/png") type = "png";
         if (mimeType === "image/gif") type = "gif";
@@ -46,7 +46,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const cleanBase64 = base64Image.replace(/^data:image\/\w+;base64,/, "");
         const imageBuffer = Buffer.from(cleanBase64, "base64");
 
-        // Pass both mimeType and type (extension) to be safe
+        // Only pass mimeType. The library logic for Buffer uploads is specific.
+        // Documentation says: options.type is required if Buffer is passed without known extension path.
+        // options.type expects a file extension (e.g. "png") or a mime type (e.g. "image/png")?
+        // Checking library source via types: it often aliases 'type' to extension.
+        // Let's pass { type: extension, mimeType: mimeType } to be fully explicit.
         const mediaId = await client.v1.uploadMedia(imageBuffer, {
           mimeType,
           type,
