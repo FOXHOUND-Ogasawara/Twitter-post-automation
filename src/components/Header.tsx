@@ -10,7 +10,7 @@ export const Header: React.FC = () => {
                         <Twitter className="w-5 h-5 text-pop-cyan" />
                     </div>
                     <h1 className="text-xl font-bold text-gray-800 tracking-tight">
-                        X 自動投稿システム <span className="text-sm font-normal text-pop-magenta ml-2">v2</span>
+                        画像いっぱい投稿できるちくわﾁｬﾝﾃﾞｽ（偉い） <span className="text-sm font-normal text-pop-magenta ml-2">v2</span>
                     </h1>
                 </div>
             </div>
