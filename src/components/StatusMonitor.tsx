@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Loader2, CheckCircle2, AlertCircle, Clock, Twitter } from 'lucide-react';
+import { Loader2, CheckCircle2, AlertCircle, Clock, History, Twitter } from 'lucide-react';
+import type { PostHistoryItem } from './HistoryGrid';
 import { getTimeline, type Tweet } from '../services/api';
 
 export interface PostGroup {
@@ -14,25 +15,86 @@ interface StatusMonitorProps {
     groups: PostGroup[];
     isPosting: boolean;
     currentGroupIndex: number;
+    history: PostHistoryItem[]; // Receive history from App
 }
 
-export const StatusMonitor: React.FC<StatusMonitorProps> = ({ groups, isPosting, currentGroupIndex: _currentGroupIndex }) => {
-    const [timeline, setTimeline] = useState<Tweet[]>([]);
+export const StatusMonitor: React.FC<StatusMonitorProps> = ({ groups, isPosting, currentGroupIndex: _currentGroupIndex, history }) => {
+    // API Timeline State
+    const [apiTweets, setApiTweets] = useState<Tweet[]>([]);
     const [loadingTimeline, setLoadingTimeline] = useState(false);
+    const [useFallback, setUseFallback] = useState(false);
 
     const fetchTimeline = async () => {
         setLoadingTimeline(true);
-        const tweets = await getTimeline();
-        setTimeline(tweets);
-        setLoadingTimeline(false);
+        setUseFallback(false);
+        try {
+            const tweets = await getTimeline();
+            if (tweets && tweets.length > 0) {
+                setApiTweets(tweets);
+                setUseFallback(false);
+            } else {
+                // Empty result might mean no tweets or filter issue, fallback just in case or show empty
+                // Ideally if API succeeds but returns 0, we trust it. But for "Smart Fallback" let's check.
+                if (tweets.length === 0) {
+                    // Empty is valid, but if user wants "Latest Activity" maybe History is better if API is empty?
+                    // Let's stick to: Success = API, Error = Fallback.
+                }
+                setApiTweets(tweets);
+            }
+        } catch (error) {
+            console.warn("Timeline API failed, falling back to history:", error);
+            setUseFallback(true);
+        } finally {
+            setLoadingTimeline(false);
+        }
     };
 
     useEffect(() => {
         fetchTimeline();
-        // Poll updates every 60 seconds if desired, but user req mainly implies "on post" or "on load"
-        // Also re-fetch when posting completes? We can't easily react to "completion" here without prop flags or effects.
-        // For now, simple initial load.
-    }, [isPosting]); // Re-fetch when posting status changes (start/end)
+    }, [isPosting]);
+
+    // Decide what to show
+    // If loading -> Show loader
+    // If not loading and useFallback -> Show History (latest 5)
+    // If not loading and not fallback -> Show API Tweets (latest 5)
+
+    // Note: getTimeline wrapper in services/api returns [] on error. 
+    // We need to modify getTimeline logic or just check if it returns empty and specific error state?
+    // Actually, current services/api.ts catches error and returns []. 
+    // So 'useFallback' won't be triggered by catch block unless getTimeline throws.
+    // The previous implementation of getTimeline returned [] on error. 
+    // Let's update StatusMonitor to treat [] as potential fallback if needed? 
+    // Or better: Let's assume if [] counts as valid. But since user has 429, we WANT fallback.
+    // I should probably switch services/api.ts to THROW on error so we can detect it here.
+    // OR, I can just blindly mix them? No, duplicates.
+
+    // Let's check api.ts again. It catches and returns [].
+    // I should modify StatusMonitor to fallback if apiTweets is empty? 
+    // Or better, let's just show history if apiTweets is empty?
+    // User requested "If I use endpoint it should work", implies meaningful data.
+    // Let's rely on apiTweets. If empty, maybe fallback to history?
+    // For now, let's try to update logic:
+    // 1. Call fetchTimeline.
+    // 2. If length 0, assume failed/empty and show history?
+    // That's a safe bet for "Smart".
+
+    const displayItems = (useFallback || apiTweets.length === 0)
+        ? history.slice(0, 5).map(h => ({
+            id: h.id,
+            text: h.text,
+            createdAt: h.timestamp,
+            source: 'history',
+            url: h.postUrl
+        }))
+        : apiTweets.map(t => ({
+            id: t.id,
+            text: t.text,
+            createdAt: t.createdAt,
+            source: 'api',
+            url: `https://twitter.com/i/web/status/${t.id}`
+        }));
+
+    const isShowingHistory = useFallback || apiTweets.length === 0;
 
     const successCount = groups.filter(g => g.status === 'success').length;
     const progress = Math.round((successCount / Math.max(groups.length, 1)) * 100);
@@ -95,12 +157,16 @@ export const StatusMonitor: React.FC<StatusMonitorProps> = ({ groups, isPosting,
                 )}
             </div>
 
-            {/* Bottom: Latest Tweets */}
+            {/* Bottom: Latest Tweets (Hybrid) */}
             <div className="space-y-4 bg-white/80 backdrop-blur-sm p-4 rounded-xl border border-pop-magenta shadow-lg h-fit">
                 <div className="flex items-center justify-between">
                     <h3 className="font-bold text-gray-700 flex items-center gap-2">
-                        <Twitter className="w-5 h-5 text-blue-400" />
-                        最新の投稿 (5件)
+                        {isShowingHistory ? (
+                            <History className="w-5 h-5 text-gray-500" />
+                        ) : (
+                            <Twitter className="w-5 h-5 text-blue-400" />
+                        )}
+                        最新の投稿 {isShowingHistory ? '(履歴)' : '(X)'}
                     </h3>
                     <button onClick={fetchTimeline} disabled={loadingTimeline} className="text-xs text-blue-500 hover:text-blue-600 underline">
                         更新
@@ -112,18 +178,23 @@ export const StatusMonitor: React.FC<StatusMonitorProps> = ({ groups, isPosting,
                         <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2" />
                         読み込み中...
                     </div>
-                ) : timeline.length === 0 ? (
+                ) : displayItems.length === 0 ? (
                     <div className="p-4 text-center text-gray-400 text-sm">
-                        表示できるツイートがありません
+                        投稿がありません
                     </div>
                 ) : (
                     <div className="space-y-3">
-                        {timeline.map((tweet) => (
-                            <div key={tweet.id} className="p-3 bg-white/60 rounded border border-gray-100 shadow-sm hover:shadow-md transition-shadow">
-                                <p className="text-sm text-gray-800 break-words whitespace-pre-wrap">{tweet.text}</p>
-                                <span className="text-xs text-gray-400 block mt-1 text-right">
-                                    {new Date(tweet.createdAt).toLocaleString()}
-                                </span>
+                        {displayItems.map((item) => (
+                            <div key={item.id} className="p-3 bg-white/60 rounded border border-gray-100 shadow-sm hover:shadow-md transition-shadow">
+                                <p className="text-sm text-gray-800 break-words whitespace-pre-wrap line-clamp-3">{item.text}</p>
+                                <div className="flex justify-between items-center mt-2">
+                                    <a href={item.url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-500 hover:underline">
+                                        Twitterで見る
+                                    </a>
+                                    <span className="text-xs text-gray-400 block text-right">
+                                        {new Date(item.createdAt).toLocaleString()}
+                                    </span>
+                                </div>
                             </div>
                         ))}
                     </div>

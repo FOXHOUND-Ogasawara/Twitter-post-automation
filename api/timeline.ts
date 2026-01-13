@@ -34,7 +34,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const timeline = await client.v2.userTimeline(me.data.id, {
       max_results: 5,
       "tweet.fields": ["created_at", "text"],
-      exclude: ["retweets", "replies"],
+      // exclude: ["retweets", "replies"], // Temporarily allow everything to see if it works
     });
 
     const tweets = timeline.tweets.map((tweet) => ({
@@ -52,6 +52,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.error("Twitter Timeline Error:", err);
     return res.status(500).json({
       error: err.message || "Failed to fetch timeline",
+      details: err.data || null,
+      code: err.code || null,
     });
   }
 }

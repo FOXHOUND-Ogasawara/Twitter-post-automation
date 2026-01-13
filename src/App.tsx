@@ -80,6 +80,7 @@ function App() {
                 groups={groups}
                 isPosting={isPosting}
                 currentGroupIndex={currentGroupIndex}
+                history={history}
               />
             </div>
           </div>
