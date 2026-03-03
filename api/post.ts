@@ -1,42 +1,53 @@
 import { VercelRequest, VercelResponse } from "@vercel/node";
 import { TwitterApi, EUploadMimeType } from "twitter-api-v2";
 
-// 503のときリトライするヘルパー
-async function uploadWithRetry(
+// Chunked Upload でメディアをアップロード
+async function uploadMediaChunked(
   client: TwitterApi,
   imageBuffer: Buffer,
   mimeType: EUploadMimeType,
   index: number,
-  maxRetries = 3,
 ): Promise<string> {
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      console.log(
-        `Uploading image ${index + 1}... attempt ${attempt}, size: ${imageBuffer.length} bytes`,
-      );
-      const mediaId = await client.v2.uploadMedia(imageBuffer, {
-        media_type: mimeType,
-      });
-      console.log(`Image ${index + 1} uploaded successfully: ${mediaId}`);
-      return mediaId;
-    } catch (err: any) {
-      console.error(
-        `Image ${index + 1} upload failed (attempt ${attempt}):`,
-        err?.code,
-        err?.data,
-      );
-      if (attempt < maxRetries && err?.code === 503) {
-        const wait = attempt * 2000; // 2秒 → 4秒 → 6秒
-        console.log(`Retrying in ${wait}ms...`);
-        await new Promise((res) => setTimeout(res, wait));
-      } else {
-        throw err;
-      }
-    }
-  }
-  throw new Error(
-    `Failed to upload image ${index + 1} after ${maxRetries} attempts`,
+  console.log(
+    `[Image ${index + 1}] Starting chunked upload... size: ${imageBuffer.length} bytes`,
   );
+
+  // Step 1: INITIALIZE
+  const initRes = await client.v2.post<{ data: { id: string } }>(
+    "media/upload/initialize",
+    {
+      total_bytes: imageBuffer.length,
+      media_type: mimeType,
+      media_category: "tweet_image",
+    },
+  );
+  const mediaId = initRes.data.id;
+  console.log(`[Image ${index + 1}] Initialized. media_id: ${mediaId}`);
+
+  // Step 2: APPEND（チャンクに分けて送信）
+  const CHUNK_SIZE = 1024 * 1024; // 1MB
+  let segmentIndex = 0;
+  for (let offset = 0; offset < imageBuffer.length; offset += CHUNK_SIZE) {
+    const chunk = imageBuffer.subarray(offset, offset + CHUNK_SIZE);
+    const base64Chunk = chunk.toString("base64");
+
+    await client.v2.post(`media/upload/${mediaId}/append`, {
+      media_data: base64Chunk,
+      segment_index: segmentIndex,
+    });
+    console.log(`[Image ${index + 1}] Appended segment ${segmentIndex}`);
+    segmentIndex++;
+  }
+
+  // Step 3: FINALIZE
+  const finalRes = await client.v2.post<{
+    data: { id: string; processing_info?: { state: string } };
+  }>(`media/upload/${mediaId}/finalize`, {});
+  console.log(
+    `[Image ${index + 1}] Finalized. state: ${finalRes.data?.processing_info?.state ?? "ready"}`,
+  );
+
+  return mediaId;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -80,27 +91,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.log("Start processing images...");
     const mediaIds: string[] = [];
 
-    // ✅ 並列 → 順番に1枚ずつアップロード
+    const mimeTypeMap: Record<string, EUploadMimeType> = {
+      "image/jpeg": EUploadMimeType.Jpeg,
+      "image/png": EUploadMimeType.Png,
+      "image/gif": EUploadMimeType.Gif,
+      "image/webp": EUploadMimeType.Webp,
+    };
+
     for (let i = 0; i < images.length; i++) {
       const base64Image = images[i];
       const match = base64Image.match(/^data:(image\/\w+);base64,/);
       const rawMime = match ? match[1] : "image/jpeg";
-      const mimeTypeMap: Record<string, EUploadMimeType> = {
-        "image/jpeg": EUploadMimeType.Jpeg,
-        "image/png": EUploadMimeType.Png,
-        "image/gif": EUploadMimeType.Gif,
-        "image/webp": EUploadMimeType.Webp,
-      };
       const mimeType = mimeTypeMap[rawMime] ?? EUploadMimeType.Jpeg;
       const cleanBase64 = base64Image.replace(/^data:image\/\w+;base64,/, "");
       const imageBuffer = Buffer.from(cleanBase64, "base64");
 
-      const mediaId = await uploadWithRetry(client, imageBuffer, mimeType as EUploadMimeType, i);
+      // ✅ Chunked Upload で1枚ずつ
+      const mediaId = await uploadMediaChunked(
+        client,
+        imageBuffer,
+        mimeType,
+        i,
+      );
       mediaIds.push(mediaId);
 
-      // 複数枚のとき、次のアップロードまで少し待つ
+      // 複数枚のとき少し待つ
       if (i < images.length - 1) {
-        await new Promise((res) => setTimeout(res, 1000));
+        await new Promise((r) => setTimeout(r, 1000));
       }
     }
 
