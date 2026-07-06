@@ -1,100 +1,60 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Loader2, CheckCircle2, AlertCircle, Clock, History, Twitter } from 'lucide-react';
-import type { PostHistoryItem } from './HistoryGrid';
-import { getTimeline, type Tweet } from '../services/api';
-
-export interface PostGroup {
-    id: string;
-    images: string[]; // Grouped image IDs
-    status: 'pending' | 'posting' | 'success' | 'failed';
-    error?: string;
-    retryCount: number;
-}
+import type { PostGroup, PostHistoryItem, Tweet } from '../types';
+import { getTimeline, toApiError } from '../services/api';
 
 interface StatusMonitorProps {
     groups: PostGroup[];
     isPosting: boolean;
     currentGroupIndex: number;
-    history: PostHistoryItem[]; // Receive history from App
+    history: PostHistoryItem[];
 }
 
-export const StatusMonitor: React.FC<StatusMonitorProps> = ({ groups, isPosting, currentGroupIndex: _currentGroupIndex, history }) => {
-    // API Timeline State
-    const [apiTweets, setApiTweets] = useState<Tweet[]>([]);
+interface DisplayItem {
+    id: string;
+    text: string;
+    createdAt: string;
+    url: string;
+}
+
+export const StatusMonitor: React.FC<StatusMonitorProps> = ({ groups, isPosting, currentGroupIndex, history }) => {
+    // X API のタイムライン読み取りはレート制限が厳しいため自動取得はせず、
+    // 通常はローカル履歴を表示して「更新」ボタン押下時のみ API を呼ぶ
+    const [apiTweets, setApiTweets] = useState<Tweet[] | null>(null);
     const [loadingTimeline, setLoadingTimeline] = useState(false);
-    const [useFallback, setUseFallback] = useState(false);
+    const [timelineError, setTimelineError] = useState<string | null>(null);
 
     const fetchTimeline = async () => {
         setLoadingTimeline(true);
-        setUseFallback(false);
+        setTimelineError(null);
         try {
             const tweets = await getTimeline();
-            if (tweets && tweets.length > 0) {
-                setApiTweets(tweets);
-                setUseFallback(false);
-            } else {
-                // Empty result might mean no tweets or filter issue, fallback just in case or show empty
-                // Ideally if API succeeds but returns 0, we trust it. But for "Smart Fallback" let's check.
-                if (tweets.length === 0) {
-                    // Empty is valid, but if user wants "Latest Activity" maybe History is better if API is empty?
-                    // Let's stick to: Success = API, Error = Fallback.
-                }
-                setApiTweets(tweets);
-            }
+            setApiTweets(tweets);
         } catch (error) {
-            console.warn("Timeline API failed, falling back to history:", error);
-            setUseFallback(true);
+            const apiError = toApiError(error, 'タイムラインの取得に失敗しました');
+            console.warn('Timeline API failed, showing local history:', apiError);
+            setApiTweets(null);
+            setTimelineError(apiError.message);
         } finally {
             setLoadingTimeline(false);
         }
     };
 
-    useEffect(() => {
-        fetchTimeline();
-    }, [isPosting]);
+    const isShowingHistory = !apiTweets || apiTweets.length === 0;
 
-    // Decide what to show
-    // If loading -> Show loader
-    // If not loading and useFallback -> Show History (latest 5)
-    // If not loading and not fallback -> Show API Tweets (latest 5)
-
-    // Note: getTimeline wrapper in services/api returns [] on error. 
-    // We need to modify getTimeline logic or just check if it returns empty and specific error state?
-    // Actually, current services/api.ts catches error and returns []. 
-    // So 'useFallback' won't be triggered by catch block unless getTimeline throws.
-    // The previous implementation of getTimeline returned [] on error. 
-    // Let's update StatusMonitor to treat [] as potential fallback if needed? 
-    // Or better: Let's assume if [] counts as valid. But since user has 429, we WANT fallback.
-    // I should probably switch services/api.ts to THROW on error so we can detect it here.
-    // OR, I can just blindly mix them? No, duplicates.
-
-    // Let's check api.ts again. It catches and returns [].
-    // I should modify StatusMonitor to fallback if apiTweets is empty? 
-    // Or better, let's just show history if apiTweets is empty?
-    // User requested "If I use endpoint it should work", implies meaningful data.
-    // Let's rely on apiTweets. If empty, maybe fallback to history?
-    // For now, let's try to update logic:
-    // 1. Call fetchTimeline.
-    // 2. If length 0, assume failed/empty and show history?
-    // That's a safe bet for "Smart".
-
-    const displayItems = (useFallback || apiTweets.length === 0)
+    const displayItems: DisplayItem[] = isShowingHistory
         ? history.slice(0, 5).map(h => ({
             id: h.id,
             text: h.text,
             createdAt: h.timestamp,
-            source: 'history',
             url: h.postUrl
         }))
         : apiTweets.map(t => ({
             id: t.id,
             text: t.text,
             createdAt: t.createdAt,
-            source: 'api',
-            url: `https://twitter.com/i/web/status/${t.id}`
+            url: `https://x.com/i/web/status/${t.id}`
         }));
-
-    const isShowingHistory = useFallback || apiTweets.length === 0;
 
     const successCount = groups.filter(g => g.status === 'success').length;
     const progress = Math.round((successCount / Math.max(groups.length, 1)) * 100);
@@ -138,7 +98,7 @@ export const StatusMonitor: React.FC<StatusMonitorProps> = ({ groups, isPosting,
                                         }`}
                                 >
                                     <div className="flex items-center gap-2">
-                                        <span className={`font-semibold ${index === _currentGroupIndex && isPosting ? 'text-pop-cyan' : 'text-gray-700'}`}>
+                                        <span className={`font-semibold ${index === currentGroupIndex && isPosting ? 'text-pop-cyan' : 'text-gray-700'}`}>
                                             グループ {index + 1}
                                         </span>
                                         <span className="text-gray-500 text-xs">({group.images.length}枚)</span>
@@ -157,7 +117,7 @@ export const StatusMonitor: React.FC<StatusMonitorProps> = ({ groups, isPosting,
                 )}
             </div>
 
-            {/* Bottom: Latest Tweets (Hybrid) */}
+            {/* Bottom: Latest Posts (Local history by default, X API on demand) */}
             <div className="space-y-4 bg-white/80 backdrop-blur-sm p-4 rounded-xl border border-pop-magenta shadow-lg h-fit">
                 <div className="flex items-center justify-between">
                     <h3 className="font-bold text-gray-700 flex items-center gap-2">
@@ -168,10 +128,14 @@ export const StatusMonitor: React.FC<StatusMonitorProps> = ({ groups, isPosting,
                         )}
                         最新の投稿 {isShowingHistory ? '(履歴)' : '(X)'}
                     </h3>
-                    <button onClick={fetchTimeline} disabled={loadingTimeline} className="text-xs text-blue-500 hover:text-blue-600 underline">
-                        更新
+                    <button onClick={fetchTimeline} disabled={loadingTimeline} className="text-xs text-blue-500 hover:text-blue-600 underline disabled:opacity-50">
+                        Xから取得
                     </button>
                 </div>
+
+                {timelineError && (
+                    <p className="text-xs text-pop-magenta">{timelineError}（ローカル履歴を表示しています）</p>
+                )}
 
                 {loadingTimeline ? (
                     <div className="p-4 text-center text-gray-500">
