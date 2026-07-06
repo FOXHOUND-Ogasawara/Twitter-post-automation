@@ -1,14 +1,7 @@
 import React from 'react';
 import { Trash2, ExternalLink, Clock } from 'lucide-react';
-import { format } from 'date-fns';
-
-export interface PostHistoryItem {
-    id: string;
-    text: string;
-    timestamp: string;
-    postUrl: string;
-    thumbnail: string;
-}
+import type { PostHistoryItem } from '../types';
+import { formatTimestamp } from '../utils/postUtils';
 
 interface HistoryGridProps {
     history: PostHistoryItem[];
@@ -72,7 +65,7 @@ export const HistoryGrid: React.FC<HistoryGridProps> = ({ history, onDelete, onC
                         <div className="p-4 space-y-3">
                             <div className="text-xs text-gray-500 flex items-center gap-1">
                                 <Clock className="w-3 h-3" />
-                                {format(new Date(item.timestamp), 'yyyy-MM-dd HH:mm:ss')}
+                                {formatTimestamp(new Date(item.timestamp))}
                             </div>
                             <p className="text-sm text-gray-800 line-clamp-3 whitespace-pre-wrap font-sans">
                                 {item.text}

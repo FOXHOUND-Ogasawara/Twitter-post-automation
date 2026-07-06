@@ -5,6 +5,7 @@ import { PostComposer } from './components/PostComposer';
 import { StatusMonitor } from './components/StatusMonitor';
 import { HistoryGrid } from './components/HistoryGrid';
 import type { ImageFile } from './utils/imageUtils';
+import { revokeImagePreviews } from './utils/imageUtils';
 import { useAutoPost } from './hooks/useAutoPost';
 
 function App() {
@@ -30,6 +31,7 @@ function App() {
 
   const handleReset = () => {
     if (confirm('入力内容をリセットしますか？')) {
+      revokeImagePreviews(images);
       setImages([]);
       setText('');
     }

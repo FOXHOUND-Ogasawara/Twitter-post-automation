@@ -1,7 +1,8 @@
 import React, { useCallback, useRef } from 'react';
 import { Upload, X, Image as ImageIcon } from 'lucide-react';
-import { validateFile } from '../utils/imageUtils';
+import { validateFile, revokeImagePreviews } from '../utils/imageUtils';
 import type { ImageFile } from '../utils/imageUtils';
+import { IMAGES_PER_GROUP } from '../constants';
 
 interface ImageUploaderProps {
     images: ImageFile[];
@@ -51,7 +52,7 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({ images, setImages 
     };
 
     const clearAll = () => {
-        images.forEach((img) => URL.revokeObjectURL(img.preview));
+        revokeImagePreviews(images);
         setImages([]);
     };
 
@@ -122,7 +123,7 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({ images, setImages 
 
             {images.length > 0 && (
                 <div className="text-right text-sm text-gray-500">
-                    合計: {images.length}枚 ({Math.ceil(images.length / 4)} グループ)
+                    合計: {images.length}枚 ({Math.ceil(images.length / IMAGES_PER_GROUP)} グループ)
                 </div>
             )}
         </div>

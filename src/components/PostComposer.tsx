@@ -1,6 +1,7 @@
 import React from 'react';
-import { format } from 'date-fns';
 import { Edit3 } from 'lucide-react';
+import { MAX_TWEET_CHARS } from '../constants';
+import { formatTimestamp, getPostBodyLength } from '../utils/postUtils';
 
 interface PostComposerProps {
     text: string;
@@ -8,12 +9,12 @@ interface PostComposerProps {
 }
 
 export const PostComposer: React.FC<PostComposerProps> = ({ text, setText }) => {
-    const MAX_CHARS = 280;
-    const length = text.length;
-    const remaining = MAX_CHARS - length;
+    // 投稿時に自動付加されるタイムスタンプ分を含めた実効文字数でカウントする
+    const effectiveLength = getPostBodyLength(text);
+    const remaining = MAX_TWEET_CHARS - effectiveLength;
 
     // Current time for preview context
-    const currentTime = format(new Date(), 'yyyy-MM-dd HH:mm:ss');
+    const currentTime = formatTimestamp(new Date());
 
     return (
         <div className="space-y-4">
@@ -23,7 +24,7 @@ export const PostComposer: React.FC<PostComposerProps> = ({ text, setText }) => 
                     投稿本文
                 </h2>
                 <div className={`text-sm font-medium ${remaining < 0 ? 'text-red-600' : 'text-gray-500'}`}>
-                    残り文字数: {remaining} / {MAX_CHARS}
+                    残り文字数: {remaining} / {MAX_TWEET_CHARS}（タイムスタンプ含む）
                 </div>
             </div>
 

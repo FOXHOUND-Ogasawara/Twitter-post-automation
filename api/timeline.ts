@@ -1,59 +1,77 @@
 import { VercelRequest, VercelResponse } from "@vercel/node";
-import { TwitterApi } from "twitter-api-v2";
+import {
+  createTwitterClient,
+  getAuthenticatedUserId,
+  getMissingEnvVars,
+  toTwitterErrorInfo,
+} from "./_lib/twitter";
+
+interface TweetSummary {
+  id: string;
+  text: string;
+  createdAt?: string;
+}
+
+// タイムラインの読み取りはレート制限が非常に厳しいため、
+// ウォームインスタンス内でレスポンスをキャッシュして X API の消費を抑える
+const CACHE_TTL_MS = 15 * 60 * 1000;
+let cache: { tweets: TweetSummary[]; fetchedAt: number } | null = null;
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  // Ensure environment variables are set
-  if (
-    !process.env.X_API_KEY ||
-    !process.env.X_API_KEY_SECRET ||
-    !process.env.X_ACCESS_TOKEN ||
-    !process.env.X_ACCESS_TOKEN_SECRET
-  ) {
-    console.error("Missing X API credentials in environment variables.");
+  const missing = getMissingEnvVars();
+  if (missing.length) {
+    console.error("Missing X API credentials:", missing.join(", "));
     return res.status(500).json({ error: "Server configuration error" });
   }
 
-  const client = new TwitterApi({
-    appKey: process.env.X_API_KEY,
-    appSecret: process.env.X_API_KEY_SECRET,
-    accessToken: process.env.X_ACCESS_TOKEN,
-    accessSecret: process.env.X_ACCESS_TOKEN_SECRET,
-  });
+  if (cache && Date.now() - cache.fetchedAt < CACHE_TTL_MS) {
+    res.setHeader("X-Timeline-Cache", "HIT");
+    return res.status(200).json({ success: true, tweets: cache.tweets });
+  }
+
+  const client = createTwitterClient();
 
   try {
-    // Get the authenticated user's ID first
-    const me = await client.v2.me();
+    const userId = await getAuthenticatedUserId(client);
 
-    // Fetch user timeline (latest 5 tweets)
-    // exclude retweets and replies to keep it clean if desired, strictly implied by "latest tweets"
-    // Using default fields
-    const timeline = await client.v2.userTimeline(me.data.id, {
+    const timeline = await client.v2.userTimeline(userId, {
       max_results: 5,
       "tweet.fields": ["created_at", "text"],
-      // exclude: ["retweets", "replies"], // Temporarily allow everything to see if it works
     });
 
-    const tweets = timeline.tweets.map((tweet) => ({
+    const tweets: TweetSummary[] = timeline.tweets.map((tweet) => ({
       id: tweet.id,
       text: tweet.text,
       createdAt: tweet.created_at,
     }));
 
-    return res.status(200).json({
-      success: true,
-      tweets: tweets,
-    });
+    cache = { tweets, fetchedAt: Date.now() };
+
+    // Vercel の CDN にもキャッシュさせ、コールドスタート時の API 消費も抑える
+    res.setHeader(
+      "Cache-Control",
+      "public, s-maxage=900, stale-while-revalidate=3600",
+    );
+    return res.status(200).json({ success: true, tweets });
   } catch (error: unknown) {
-    const err = error as any;
-    console.error("Twitter Timeline Error:", err);
-    return res.status(500).json({
-      error: err.message || "Failed to fetch timeline",
-      details: err.data || null,
-      code: err.code || null,
+    const info = toTwitterErrorInfo(error);
+    console.error("Twitter Timeline Error:", JSON.stringify(info, null, 2));
+
+    // レート制限などで取得できなくても、期限切れキャッシュが残っていればそれを返す
+    if (cache) {
+      res.setHeader("X-Timeline-Cache", "STALE");
+      return res.status(200).json({ success: true, tweets: cache.tweets });
+    }
+
+    return res.status(info.status).json({
+      error: info.message,
+      code: info.code,
+      data: info.data,
+      rateLimitReset: info.rateLimitReset,
     });
   }
 }
