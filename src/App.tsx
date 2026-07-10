@@ -6,6 +6,7 @@ import { StatusMonitor } from './components/StatusMonitor';
 import { HistoryGrid } from './components/HistoryGrid';
 import type { ImageFile } from './utils/imageUtils';
 import { revokeImagePreviews } from './utils/imageUtils';
+import { getTweetRemaining } from './utils/postUtils';
 import { useAutoPost } from './hooks/useAutoPost';
 
 function App() {
@@ -23,8 +24,11 @@ function App() {
     clearHistory
   } = useAutoPost();
 
+  const isOverLimit = getTweetRemaining(text) < 0;
+
   const handlePost = () => {
     if (images.length === 0) return alert('画像を1枚以上選択してください');
+    if (isOverLimit) return alert('本文が文字数の上限を超えています');
 
     startPosting(text, images);
   };
@@ -57,8 +61,8 @@ function App() {
             <div className="flex gap-4">
               <button
                 onClick={handlePost}
-                disabled={isPosting || images.length === 0}
-                className={`flex-1 font-bold py-4 rounded-xl transition-all shadow-lg ${isPosting || images.length === 0
+                disabled={isPosting || images.length === 0 || isOverLimit}
+                className={`flex-1 font-bold py-4 rounded-xl transition-all shadow-lg ${isPosting || images.length === 0 || isOverLimit
                   ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                   : 'bg-black text-white hover:bg-gray-800 hover:shadow-xl hover:-translate-y-0.5 hover:shadow-pop-cyan/50'
                   }`}
@@ -67,7 +71,9 @@ function App() {
                   ? errorCountdown > 0
                     ? `エラー発生 — ${errorCountdown}秒後に再試行できます`
                     : '自動投稿を実行中...'
-                  : '自動投稿を開始する'}
+                  : isOverLimit
+                    ? '文字数が上限を超えています'
+                    : '自動投稿を開始する'}
               </button>
               <button
                 onClick={handleReset}
