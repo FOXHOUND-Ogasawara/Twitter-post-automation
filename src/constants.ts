@@ -14,7 +14,8 @@ export const ERROR_TIMEOUT_SEC = 30;
 export const HISTORY_KEY = "x_auto_post_history";
 export const MAX_HISTORY = 100;
 
-export const MAX_TWEET_CHARS = 280;
+// X の重み付き文字数の上限（日本語・全角は1文字=2としてカウントされる）
+export const MAX_TWEET_WEIGHT = 280;
 
 // 投稿本文・履歴表示で共通のタイムスタンプ形式
 export const TIMESTAMP_FORMAT = "yyyy-MM-dd HH:mm:ss";
