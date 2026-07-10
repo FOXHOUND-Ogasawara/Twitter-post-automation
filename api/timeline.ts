@@ -4,7 +4,7 @@ import {
   getAuthenticatedUserId,
   getMissingEnvVars,
   toTwitterErrorInfo,
-} from "./_lib/twitter";
+} from "./_lib/twitter.js";
 
 interface TweetSummary {
   id: string;

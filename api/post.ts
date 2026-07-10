@@ -4,7 +4,7 @@ import {
   createTwitterClient,
   getMissingEnvVars,
   toTwitterErrorInfo,
-} from "./_lib/twitter";
+} from "./_lib/twitter.js";
 
 const MIME_TYPE_MAP: Record<string, EUploadMimeType> = {
   "image/jpeg": EUploadMimeType.Jpeg,
